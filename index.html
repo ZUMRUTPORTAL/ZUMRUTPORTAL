@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zümrüt Portal - Kurumsal Stok & Kullanıcı Yönetimi</title>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { margin: 0; background: #0f172a; color: #f8fafc; padding: 12px; }
+        
+        /* GİRİŞ EKRANI */
+        #loginOverlay { position: fixed; inset: 0; background: #0f172a; z-index: 999; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .login-card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 24px; width: 100%; max-width: 380px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        .login-card h2 { color: #38bdf8; margin-top: 0; font-size: 20px; }
+        .login-card p { font-size: 13px; color: #94a3b8; margin-bottom: 20px; }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 10px 0 14px 0; border-bottom: 1px solid #334155; margin-bottom: 14px; }
+        .card { background: #1e293b; border: 1px solid #334155; border-radius: 14px; padding: 16px; margin-bottom: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+        h3 { margin-top: 0; font-size: 16px; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; }
+        label { font-size: 12px; color: #94a3b8; font-weight: 600; display: block; margin-top: 10px; }
+        input, select { width: 100%; padding: 12px; background: #0f172a; border: 1px solid #475569; border-radius: 8px; color: white; font-size: 15px; margin-top: 4px; }
+        input:disabled { background: #1e293b; color: #38bdf8; font-weight: bold; }
+        .btn { width: 100%; padding: 13px; border-radius: 8px; border: none; font-weight: bold; font-size: 15px; cursor: pointer; margin-top: 12px; }
+        .btn-primary { background: #0284c7; color: white; }
+        .btn-success { background: #16a34a; color: white; }
+        .btn-purple { background: #7c3aed; color: white; }
+        .btn-danger { background: #ef4444; color: white; padding: 6px 12px; font-size: 12px; border-radius: 6px; border: none; cursor: pointer; }
+        .btn-del { background: #dc2626; color: white; border: none; padding: 4px 8px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+        #reader { width: 100%; border-radius: 8px; overflow: hidden; background: black; min-height: 200px; margin-top: 6px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th { background: #0f172a; color: #94a3b8; text-align: left; padding: 10px; border-bottom: 1px solid #334155; }
+        td { padding: 10px; border-bottom: 1px solid #334155; }
+        .badge { background: #0284c7; color: white; padding: 3px 8px; border-radius: 6px; font-weight: bold; }
+        .badge-qty { background: #16a34a; color: white; padding: 3px 8px; border-radius: 6px; font-weight: bold; }
+        .user-tag { background: #334155; padding: 4px 10px; border-radius: 20px; font-size: 13px; color: #38bdf8; font-weight: 600; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+        .tabs button { flex: 1; padding: 10px; background: #334155; color: #94a3b8; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .tabs button.active { background: #0284c7; color: white; }
+    </style>
+</head>
+<body>
+
+<!-- 1. GİRİŞ PORTALI -->
+<div id="loginOverlay">
+    <div class="login-card">
+        <h2>🔒 Zümrüt Giriş Portalı</h2>
+        <p>Lütfen hesabınızı seçin ve şifrenizi girin.</p>
+        
+        <label style="text-align:left;">Kullanıcı</label>
+        <select id="loginKullaniciSecici"></select>
+
+        <label style="text-align:left;">Şifre / PIN</label>
+        <input type="password" id="loginSifre" placeholder="••••" style="text-align:center; font-size:22px; letter-spacing:4px;">
+
+        <button class="btn btn-primary" onclick="girisYap()">Sisteme Giriş Yap</button>
+        <div id="loginHata" style="color:#ef4444; font-size:13px; margin-top:10px; display:none; font-weight:bold;">Hatalı şifre girdiniz!</div>
+    </div>
+</div>
+
+<!-- 2. ANA UYGULAMA ALANI -->
+<div id="anaUygulama" style="display:none; max-width:900px; margin:auto;">
+    <div class="header">
+        <span class="user-tag" id="aktifKullaniciTag">👤 Kullanıcı</span>
+        <button class="btn-danger" onclick="cikisYap()">Güvenli Çıkış</button>
+    </div>
+
+    <!-- ELEMAN SAYIM ALANI -->
+    <div id="elemanEkrani">
+        <div class="card">
+            <h3>👤 Personel & Fatura Başlığı</h3>
+            <label>Sayımı Yapan Personel</label>
+            <input type="text" id="personelAd" disabled>
+            <label>Fatura / İrsaliye Adı</label>
+            <input type="text" id="faturaBaslik" placeholder="Örn: Hatip_Gelen_Fatura_01">
+        </div>
+
+        <div class="card">
+            <h3>📷 Barkod Tara & Ekle</h3>
+            <div id="reader"></div>
+            <button class="btn btn-primary" onclick="kameraAc()">📷 Kamerayı Başlat</button>
+            
+            <label>Barkod</label>
+            <input type="text" id="barkodGiris" placeholder="Kameradan okunur veya elle yazın">
+            
+            <div style="display:flex; gap:10px;">
+                <div style="flex:1;">
+                    <label>Fatura Sıra No</label>
+                    <input type="number" id="siraNo" value="1">
+                </div>
+                <div style="flex:1;">
+                    <label>Adet</label>
+                    <input type="number" id="adet" value="1">
+                </div>
+            </div>
+
+            <button class="btn btn-success" onclick="kalemEkle()">➕ Kalemi Faturaya Ekle</button>
+        </div>
+
+        <div class="card">
+            <h3>📋 Şu An Eklenen Kalemler (<span id="kalemSayac">0</span>)</h3>
+            <table>
+                <thead>
+                    <tr><th>Sıra</th><th>Barkod</th><th>Adet</th></tr>
+                </thead>
+                <tbody id="kalemTablosu"></tbody>
+            </table>
+            <button class="btn btn-purple" onclick="faturaKaydet()">💾 Faturayı Tamamla ve Gönder</button>
+        </div>
+    </div>
+
+    <!-- SADECE PATRON/YÖNETİCİYE ÖZEL YÖNETİM MERKEZİ -->
+    <div id="adminPaneli" style="display:none;">
+        <div class="tabs">
+            <button id="btnTabFaturalar" class="active" onclick="adminSekmeDegis('faturalar')">📂 Kayıtlı Faturalar</button>
+            <button id="btnTabKullanicilar" onclick="adminSekmeDegis('kullanicilar')">👥 Kullanıcı / Eleman Yönetimi</button>
+        </div>
+
+        <!-- 1. SEKME: FATURALAR VE EXCEL -->
+        <div id="adminSekmeFaturalar" class="card">
+            <h3>
+                <span>📂 Kayıtlı Fatura Dosyaları</span>
+                <button class="btn-del" onclick="faturaSil()">🗑️ Seçili Faturayı Sil</button>
+            </h3>
+            <label>İncelemek İstediğiniz Faturayı Seçin:</label>
+            <select id="faturaSecici" onchange="faturaDetayGoster()"></select>
+            
+            <div id="faturaOzet" style="margin-top:14px; font-size:14px; color:#38bdf8;"></div>
+            
+            <table style="margin-top:15px;">
+                <thead>
+                    <tr><th>Sıra No</th><th>Barkod</th><th>Adet</th><th>Kayıt Saati</th></tr>
+                </thead>
+                <tbody id="detayTablosu"></tbody>
+            </table>
+
+            <button class="btn btn-success" style="margin-top:20px;" onclick="excelIndir()">📊 Faturayı Excel Olarak İndir</button>
+        </div>
+
+        <!-- 2. SEKME: ELEMAN / KULLANICI YÖNETİMİ -->
+        <div id="adminSekmeKullanicilar" class="card" style="display:none;">
+            <h3>👥 Personel Ekle / Düzenle / Sil</h3>
+            
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <input type="text" id="yeniPersonelAd" placeholder="Yeni Personel Ad Soyad">
+                <input type="password" id="yeniPersonelSifre" placeholder="PIN / Şifre" style="max-width:130px;">
+                <button class="btn btn-success" style="margin-top:4px; max-width:140px;" onclick="personelEkle()">➕ Eleman Ekle</button>
+            </div>
+
+            <table>
+                <thead>
+                    <tr><th>Personel Adı</th><th>Giriş Şifresi</th><th>Yetki</th><th>İşlem</th></tr>
+                </thead>
+                <tbody id="kullaniciTablosu"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    // BAŞLANGIÇ KULLANICILARI (LocalStorage'da saklanır ve ekran üzerinden yönetilir)
+    const VARSAYILAN_KULLANICILAR = [
+        { id: "admin", ad: "Yönetici (Patron)", sifre: "1985", rol: "admin" },
+        { id: "p1", ad: "Ahmet Yılmaz", sifre: "1111", rol: "personel" },
+        { id: "p2", ad: "Mehmet Demir", sifre: "2222", rol: "personel" }
+    ];
+
+    let kullanicilar = JSON.parse(localStorage.getItem("zumrut_kullanicilar")) || VARSAYILAN_KULLANICILAR;
+    let aktifKullanici = null;
+    let aktifKalemler = [];
+    let tumFaturalar = JSON.parse(localStorage.getItem("zumrut_faturalar") || "{}");
+    let html5QrCode = null;
+
+    function kullaniciListesiniKaydet() {
+        localStorage.setItem("zumrut_kullanicilar", JSON.stringify(kullanicilar));
+        girisSelectGuncelle();
+        adminKullaniciTablosuCiz();
+    }
+
+    function girisSelectGuncelle() {
+        const sel = document.getElementById("loginKullaniciSecici");
+        sel.innerHTML = "";
+        kullanicilar.forEach(u => {
+            sel.innerHTML += `<option value="${u.id}">${u.ad} (${u.rol === 'admin' ? 'Yönetici' : 'Personel'})</option>`;
+        });
+    }
+
+    function girisYap() {
+        const id = document.getElementById("loginKullaniciSecici").value;
+        const sifre = document.getElementById("loginSifre").value.trim();
+        const user = kullanicilar.find(x => x.id === id);
+
+        if (user && user.sifre === sifre) {
+            aktifKullanici = user;
+            document.getElementById("loginOverlay").style.display = "none";
+            document.getElementById("anaUygulama").style.display = "block";
+            document.getElementById("aktifKullaniciTag").innerText = "👤 " + user.ad;
+            document.getElementById("personelAd").value = user.ad;
+
+            if (user.rol === "admin") {
+                document.getElementById("adminPaneli").style.display = "block";
+                document.getElementById("elemanEkrani").style.display = "block";
+                faturaListesiGuncelle();
+                adminKullaniciTablosuCiz();
+            } else {
+                document.getElementById("adminPaneli").style.display = "none";
+                document.getElementById("elemanEkrani").style.display = "block";
+            }
+            document.getElementById("loginHata").style.display = "none";
+            document.getElementById("loginSifre").value = "";
+        } else {
+            document.getElementById("loginHata").style.display = "block";
+        }
+    }
+
+    function cikisYap() {
+        aktifKullanici = null;
+        document.getElementById("anaUygulama").style.display = "none";
+        document.getElementById("loginOverlay").style.display = "flex";
+        document.getElementById("loginSifre").value = "";
+    }
+
+    function adminSekmeDegis(tur) {
+        document.getElementById("adminSekmeFaturalar").style.display = tur === 'faturalar' ? 'block' : 'none';
+        document.getElementById("adminSekmeKullanicilar").style.display = tur === 'kullanicilar' ? 'block' : 'none';
+        document.getElementById("btnTabFaturalar").className = tur === 'faturalar' ? 'active' : '';
+        document.getElementById("btnTabKullanicilar").className = tur === 'kullanicilar' ? 'active' : '';
+    }
+
+    function adminKullaniciTablosuCiz() {
+        const tbody = document.getElementById("kullaniciTablosu");
+        tbody.innerHTML = "";
+        kullanicilar.forEach(u => {
+            const silBtn = u.rol === 'admin' ? '<span style="color:#64748b; font-size:12px;">Silinemez</span>' : `<button class="btn-del" onclick="personelSil('${u.id}')">Sil</button>`;
+            tbody.innerHTML += `
+                <tr>
+                    <td><b>${u.ad}</b></td>
+                    <td><input type="text" value="${u.sifre}" onchange="sifreGuncelle('${u.id}', this.value)" style="padding:4px 8px; font-size:13px; max-width:100px;"></td>
+                    <td><span class="badge" style="background:${u.rol==='admin'?'#0284c7':'#64748b'}">${u.rol.toUpperCase()}</span></td>
+                    <td>${silBtn}</td>
+                </tr>
+            `;
+        });
+    }
+
+    function personelEkle() {
+        const ad = document.getElementById("yeniPersonelAd").value.trim();
+        const sifre = document.getElementById("yeniPersonelSifre").value.trim();
+        if (!ad || !sifre) { alert("Lütfen ad ve şifre girin!"); return; }
+
+        const yeniId = "p_" + Date.now();
+        kullanicilar.push({ id: yeniId, ad: ad, sifre: sifre, rol: "personel" });
+        kullaniciListesiniKaydet();
+        document.getElementById("yeniPersonelAd").value = "";
+        document.getElementById("yeniPersonelSifre").value = "";
+        alert(`${ad} sisteme başarıyla eklendi!`);
+    }
+
+    function personelSil(id) {
+        if (!confirm("Bu personeli silmek istediğinize emin misiniz?")) return;
+        kullanicilar = kullanicilar.filter(x => x.id !== id);
+        kullaniciListesiniKaydet();
+    }
+
+    function sifreGuncelle(id, yeniSifre) {
+        const user = kullanicilar.find(x => x.id === id);
+        if (user && yeniSifre.trim()) {
+            user.sifre = yeniSifre.trim();
+            kullaniciListesiniKaydet();
+            alert(`${user.ad} için yeni şifre kaydedildi!`);
+        }
+    }
+
+    function faturaSil() {
+        const secilen = document.getElementById("faturaSecici").value;
+        if (!secilen || secilen === "Kayıtlı fatura yok") return;
+        if (confirm(`'${secilen}' başlıklı faturayı kalıcı olarak silmek istiyor musunuz?`)) {
+            delete tumFaturalar[secilen];
+            localStorage.setItem("zumrut_faturalar", JSON.stringify(tumFaturalar));
+            faturaListesiGuncelle();
+            alert("Fatura silindi!");
+        }
+    }
+
+    function kameraAc() {
+        html5QrCode = new Html5Qrcode("reader");
+        html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 150 } }, (text) => {
+            document.getElementById("barkodGiris").value = text;
+            if (navigator.vibrate) navigator.vibrate(100);
+        }).catch(err => alert("Kamera izni verilemedi: " + err));
+    }
+
+    function kalemEkle() {
+        const barkod = document.getElementById("barkodGiris").value.trim();
+        const sira = parseInt(document.getElementById("siraNo").value) || 1;
+        const adet = parseInt(document.getElementById("adet").value) || 1;
+
+        if (!barkod) { alert("Lütfen barkod okutun veya yazın!"); return; }
+
+        aktifKalemler.push({
+            sira: sira,
+            barkod: barkod,
+            adet: adet,
+            saat: new Date().toLocaleTimeString('tr-TR')
+        });
+
+        document.getElementById("barkodGiris").value = "";
+        document.getElementById("siraNo").value = sira + 1;
+        document.getElementById("adet").value = 1;
+        tabloCiz();
+    }
+
+    function tabloCiz() {
+        const tbody = document.getElementById("kalemTablosu");
+        tbody.innerHTML = "";
+        aktifKalemler.slice().reverse().forEach(k => {
+            tbody.innerHTML += `<tr><td><span class="badge">#${k.sira}</span></td><td>${k.barkod}</td><td><span class="badge-qty">${k.adet}</span></td></tr>`;
+        });
+        document.getElementById("kalemSayac").innerText = aktifKalemler.length;
+    }
+
+    function faturaKaydet() {
+        const personel = aktifKullanici.ad;
+        const baslik = document.getElementById("faturaBaslik").value.trim();
+
+        if (!baslik) { alert("Lütfen Fatura / İrsaliye Adını yazın!"); return; }
+        if (aktifKalemler.length === 0) { alert("Listede hiç ürün yok!"); return; }
+
+        tumFaturalar[baslik] = {
+            personel: personel,
+            tarih: new Date().toLocaleDateString('tr-TR') + " " + new Date().toLocaleTimeString('tr-TR'),
+            kalemler: aktifKalemler
+        };
+
+        localStorage.setItem("zumrut_faturalar", JSON.stringify(tumFaturalar));
+        alert("Fatura başarıyla kaydedildi!");
+
+        aktifKalemler = [];
+        document.getElementById("barkodGiris").value = "";
+        document.getElementById("faturaBaslik").value = "";
+        document.getElementById("siraNo").value = 1;
+        tabloCiz();
+        if (aktifKullanici.rol === "admin") faturaListesiGuncelle();
+    }
+
+    function faturaListesiGuncelle() {
+        const secici = document.getElementById("faturaSecici");
+        secici.innerHTML = "";
+        const keys = Object.keys(tumFaturalar);
+        if (keys.length === 0) {
+            secici.innerHTML = "<option>Kayıtlı fatura yok</option>";
+            document.getElementById("detayTablosu").innerHTML = "";
+            document.getElementById("faturaOzet").innerText = "";
+            return;
+        }
+        keys.forEach(k => { secici.innerHTML += `<option value="${k}">${k}</option>`; });
+        faturaDetayGoster();
+    }
+
+    function faturaDetayGoster() {
+        const secilen = document.getElementById("faturaSecici").value;
+        const veri = tumFaturalar[secilen];
+        if (!veri) return;
+
+        const toplamAdet = veri.kalemler.reduce((acc, x) => acc + x.adet, 0);
+        document.getElementById("faturaOzet").innerHTML = `<b>Personel:</b> ${veri.personel} | <b>Tarih:</b> ${veri.tarih} | <b>Kalem:</b> ${veri.kalemler.length} | <b>Toplam:</b> ${toplamAdet} Adet`;
+
+        const tbody = document.getElementById("detayTablosu");
+        tbody.innerHTML = "";
+        veri.kalemler.forEach(k => {
+            tbody.innerHTML += `<tr><td><span class="badge">#${k.sira}</span></td><td>${k.barkod}</td><td><span class="badge-qty">${k.adet}</span></td><td>${k.saat}</td></tr>`;
+        });
+    }
+
+    function excelIndir() {
+        const secilen = document.getElementById("faturaSecici").value;
+        const veri = tumFaturalar[secilen];
+        if (!veri) return;
+
+        let csv = "\uFEFFSıra No;Barkod;Adet;Kayıt Saati;Personel;Fatura Başlığı\n";
+        veri.kalemler.forEach(k => {
+            csv += `${k.sira};${k.barkod};${k.adet};${k.saat};${veri.personel};${secilen}\n`;
+        });
+
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `${secilen}.csv`;
+        link.click();
+    }
+
+    // İlk açılışta kullanıcı listesini yükle
+    girisSelectGuncelle();
+</script>
+</body>
+</html>
