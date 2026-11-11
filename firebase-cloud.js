@@ -2,7 +2,7 @@
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const $ = id => document.getElementById(id);
 const firebaseConfig = {
-  apiKey: "AIzaSyBfJxNuC230YYQcRffkDyxcXRO0VxD_BxA",
+  apiKey: "AIzaSyBfJxNuc23OYYQcRffkDyxcXRO0VxD_BxA",
   authDomain: "zpor-b2549.firebaseapp.com",
   projectId: "zpor-b2549",
   storageBucket: "zpor-b2549.firebasestorage.app",
