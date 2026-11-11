@@ -12,6 +12,8 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
 const db = firebase.firestore();
+// İlk kurulum için yalnızca proje sahibinin Firebase Auth UID'si yönetici profili açabilir.
+const ADMIN_BOOTSTRAP_UID = "g5Xh05fD0zcsWoa04nrrcKCH5me2";
 // Personel eklerken adminin ana oturumunu kapatmamak için ayrı Auth nesnesi.
 const personelAuth = firebase.initializeApp(firebaseConfig, "personelHesaplari").auth();
 auth.languageCode = "tr";
@@ -64,7 +66,12 @@ async function profileYukle(user) {
   if (yuklenenUid === user.uid && aktifKullanici) return;
   yuklenenUid = user.uid;
   try {
-    const snap = await db.collection("profiles").doc(user.uid).get();
+    const profileRef = db.collection("profiles").doc(user.uid);
+    let snap = await profileRef.get();
+    if (!snap.exists && user.uid === ADMIN_BOOTSTRAP_UID) {
+      await profileRef.set({ad:"İbrahim Etem Korhan",email:user.email || "",role:"admin",active:true});
+      snap = await profileRef.get();
+    }
     if (!snap.exists || snap.data().active !== true) throw new Error("Bu hesapta etkin portal profili yok. İlk yönetici profilini kurulum kılavuzuna göre oluşturun.");
     const p = snap.data();
     aktifKullanici = {id:user.uid, email:user.email || p.email || "", ad:p.ad || user.email || "Kullanıcı", rol:p.role || "personel"};
