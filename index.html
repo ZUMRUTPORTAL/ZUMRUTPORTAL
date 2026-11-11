@@ -6,6 +6,9 @@
 <title>Zümrüt Portal - Stok & Fatura Sayım</title>
 <script src="https://unpkg.com/html5-qrcode"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <style>
 * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
 body { margin: 0; background: #0f172a; color: #f8fafc; padding: 12px; }
@@ -83,12 +86,13 @@ td { padding: 10px; border-bottom: 1px solid #334155; word-break: break-all; }
 <div id="loginOverlay">
   <div class="login-card">
     <h2>🔒 Zümrüt Giriş Portalı</h2>
-    <p>Lütfen hesabınızı seçin ve şifrenizi girin.</p>
-    <label style="text-align:left;">Kullanıcı</label>
-    <select id="loginKullaniciSecici"></select>
-    <label style="text-align:left;">Şifre / PIN</label>
-    <input type="password" id="loginSifre" placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:4px;">
+    <p>E-posta adresiniz ve şifrenizle giriş yapın.</p>
+    <label style="text-align:left;">E-posta</label>
+    <input type="email" id="loginEmail" placeholder="ornek@firma.com" autocomplete="username">
+    <label style="text-align:left;">Şifre</label>
+    <input type="password" id="loginSifre" placeholder="Şifreniz" autocomplete="current-password">
     <button class="btn btn-primary" onclick="girisYap()">Sisteme Giriş Yap</button>
+    <button class="btn btn-gray" onclick="sifreSifirlamaIste()">Şifremi e-posta ile sıfırla</button>
     <div id="loginHata" style="color:#ef4444;font-size:13px;margin-top:10px;display:none;font-weight:bold;">Hatalı şifre girdiniz!</div>
   </div>
 </div>
@@ -182,8 +186,9 @@ td { padding: 10px; border-bottom: 1px solid #334155; word-break: break-all; }
     <div id="adminSekmeKullanicilar" class="card" style="display:none;">
       <h3>👥 Personel Ekle / Düzenle / Sil</h3>
       <div class="row" style="align-items:end;">
-        <div style="flex:2;"><label>Ad Soyad</label><input type="text" id="yeniPersonelAd" placeholder="Yeni Personel Ad Soyad"></div>
-        <div><label>PIN</label><input type="password" id="yeniPersonelSifre" placeholder="PIN"></div>
+        <div><label>Ad Soyad</label><input type="text" id="yeniPersonelAd" placeholder="Yeni Personel Ad Soyad"></div>
+        <div><label>E-posta</label><input type="email" id="yeniPersonelEmail" placeholder="personel@firma.com"></div>
+        <div><label>Başlangıç şifresi (en az 6 karakter)</label><input type="password" id="yeniPersonelSifre" placeholder="Şifre"></div>
       </div>
       <button class="btn btn-success" onclick="personelEkle()">➕ Eleman Ekle</button>
       <table>
@@ -204,10 +209,9 @@ td { padding: 10px; border-bottom: 1px solid #334155; word-break: break-all; }
 
     <!-- UZAKTAN ERİŞİM / SENKRON AYARI -->
     <div id="adminSekmeBulut" class="card" style="display:none;">
-      <h3>☁️ Uzaktan Canlı Eşitleme (Firebase Realtime DB)</h3>
-      <label>Firebase Database URL (Örn: https://proje-adi-default-rtdb.firebaseio.com/)</label>
-      <input type="text" id="firebaseUrl" placeholder="https://..." onchange="firebaseKaydet()">
-      <button class="btn btn-primary" onclick="firebaseKaydet()">💾 Bulut Bağlantısını Kaydet ve Eşitle</button>
+      <h3>☁️ Firebase canlı eşitleme</h3>
+      <div id="bulutDurum" class="not">Giriş yapınca Firestore bağlantı durumu burada görünür.</div>
+      <button class="btn btn-primary" onclick="eskiVerileriAktar()">Bu cihazdaki eski verileri Firebase’e aktar</button>
     </div>
   </div>
 </div>
@@ -246,7 +250,7 @@ td { padding: 10px; border-bottom: 1px solid #334155; word-break: break-all; }
   </div>
 </div>
 
-<script>
+<script type="text/plain" id="legacyLocalOnlyCode">
 /* ---------- YARDIMCILAR ---------- */
 const esc = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const $ = id => document.getElementById(id);
@@ -951,5 +955,6 @@ function csvIndir() {
 $("loginSifre").addEventListener("keydown", e => { if (e.key === "Enter") girisYap(); });
 kullanicilariHazirla();
 </script>
+<script src="firebase-cloud.js"></script>
 </body>
 </html>
