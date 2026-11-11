@@ -41,10 +41,31 @@ td { padding: 10px; border-bottom: 1px solid #334155; word-break: break-all; }
 #okunduUyari { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: #16a34a; color: white; padding: 14px 22px; border-radius: 12px; font-weight: bold; font-size: 15px; z-index: 1000; display: none; box-shadow: 0 6px 20px rgba(0,0,0,.5); text-align: center; white-space: pre-line; max-width: 90%; }
 #okunduUyari.hata { background: #dc2626; }
 .not { font-size: 12px; color: #94a3b8; margin-top: 8px; line-height: 1.5; }
+#adetModal { position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 1100; display: none; align-items: center; justify-content: center; padding: 20px; }
+.modal-kutu { background: #1e293b; border: 2px solid #38bdf8; border-radius: 16px; padding: 22px; width: 100%; max-width: 360px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+.modal-kutu h2 { margin: 0 0 6px; color: #16a34a; font-size: 18px; }
+.modal-barkod { font-size: 20px; font-weight: bold; color: #f8fafc; word-break: break-all; }
+.modal-urun { color: #fbbf24; font-size: 14px; margin-top: 4px; }
+.modal-mevcut { color: #94a3b8; font-size: 12px; margin-top: 6px; min-height: 16px; }
+#modalAdet { text-align: center; font-size: 32px; font-weight: bold; padding: 14px; margin-top: 12px; }
 </style>
 </head>
 <body>
 <div id="okunduUyari"></div>
+
+<!-- ADET SORMA PENCERESİ -->
+<div id="adetModal">
+  <div class="modal-kutu">
+    <h2>✅ BARKOD OKUNDU</h2>
+    <div class="modal-barkod" id="modalBarkod"></div>
+    <div class="modal-urun" id="modalUrun"></div>
+    <div class="modal-mevcut" id="modalMevcut"></div>
+    <label style="text-align:center;">Kaç adet?</label>
+    <input type="number" id="modalAdet" value="1" min="1" inputmode="numeric" onkeydown="if(event.key==='Enter'){adetOnayla();}">
+    <button class="btn btn-success" onclick="adetOnayla()">✔️ Onayla ve Sıradaki Barkoda Geç</button>
+    <button class="btn btn-gray" onclick="adetIptal()">✖️ İptal (Ekleme)</button>
+  </div>
+</div>
 
 <!-- GİRİŞ -->
 <div id="loginOverlay">
@@ -95,7 +116,7 @@ td { padding: 10px; border-bottom: 1px solid #334155; word-break: break-all; }
         <div><label>Adet</label><input type="number" id="adet" value="1" min="1"></div>
       </div>
       <button class="btn btn-success" onclick="kalemEkle()">➕ Kalemi Faturaya Ekle</button>
-      <div class="not">Kamera açıkken okunan barkod otomatik eklenir. Aynı barkod tekrar okunursa yeni satır açılmaz, adedi artar. Adet kutusuna 1'den fazla yazarsanız okutulan her barkoda o kadar eklenir.</div>
+      <div class="not">Barkod okununca "Kaç adet?" penceresi açılır. Adedi yazıp Onayla'ya basınca (veya Enter) kalem eklenir ve kamera sıradaki barkoda geçer. Aynı barkod tekrar okutulursa yeni satır açılmaz, adedi artar. Elle barkod yazarsanız aşağıdaki Adet kutusu kullanılır.</div>
     </div>
 
     <div class="card">
@@ -377,16 +398,13 @@ function kameraAc() {
       if (text === sonOkunan && simdi - sonOkunanZaman < 3000) return; // aynı barkoda 3 sn koruma
       kilit = true;
       sonOkunan = text; sonOkunanZaman = simdi;
-      $("barkodGiris").value = text;
-      const eklendi = kalemEkle(true);
-      if (eklendi) {
-        bip(); if (navigator.vibrate) navigator.vibrate(150);
-        const ad = urunler[text] ? "\n" + urunler[text] : "";
-        uyari("✅ OKUNDU: " + text + ad + "\nSıradaki barkodu okutun");
-      } else {
+      if (!$("faturaBaslik").value.trim()) {
+        uyari("⚠️ Önce Fatura / İrsaliye adını yazın!", true);
         bip(true);
+        setTimeout(() => { kilit = false; }, 1500);
+        return;
       }
-      setTimeout(() => { kilit = false; }, 1500);
+      adetSor(text); // adet sorulur, onaylanınca sıradaki barkoda geçilir
     }
   ).then(() => {
     kameraAcik = true;
@@ -397,6 +415,49 @@ function kameraAc() {
     html5QrCode = null;
     alert("Kamera açılamadı: " + err);
   });
+}
+
+/* ---------- ADET SORMA ---------- */
+let bekleyenBarkod = "";
+
+function adetSor(barkod) {
+  bekleyenBarkod = barkod;
+  $("modalBarkod").innerText = barkod;
+  $("modalUrun").innerText = urunler[barkod] || "";
+  const mevcut = aktifKalemler.find(k => k.barkod === barkod);
+  $("modalMevcut").innerText = mevcut ? "Listede zaten " + mevcut.adet + " adet var, girdiğiniz adet üzerine eklenir." : "";
+  $("modalAdet").value = 1;
+  $("adetModal").style.display = "flex";
+  bip();
+  if (navigator.vibrate) navigator.vibrate(150);
+  setTimeout(() => { $("modalAdet").focus(); $("modalAdet").select(); }, 80);
+}
+
+function adetModalKapat() {
+  $("adetModal").style.display = "none";
+  bekleyenBarkod = "";
+  sonOkunanZaman = Date.now();
+  kilit = false; // kamera yeniden okumaya hazır
+}
+
+function adetOnayla() {
+  const adet = parseInt($("modalAdet").value);
+  if (!adet || adet < 1) { alert("Lütfen 1 veya daha büyük bir adet girin!"); return; }
+  const barkod = bekleyenBarkod;
+  $("barkodGiris").value = barkod;
+  $("adet").value = adet;
+  const eklendi = kalemEkle(true);
+  adetModalKapat();
+  if (eklendi) {
+    bip();
+    uyari("✅ EKLENDİ: " + barkod + " × " + adet + "\nSıradaki barkodu okutun");
+  }
+}
+
+function adetIptal() {
+  $("barkodGiris").value = "";
+  adetModalKapat();
+  uyari("İptal edildi. Sıradaki barkodu okutun");
 }
 
 async function kameraKapat() {
