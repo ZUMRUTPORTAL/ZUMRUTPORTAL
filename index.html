@@ -80,14 +80,18 @@ td { padding: 10px; border-bottom: 1px solid #334155; word-break: break-all; }
 </div>
 
 <!-- GİRİŞ -->
-<div id="loginOverlay"><div class="login-card">
-  <h2>🔒 Zümrüt Giriş Portalı</h2><p>E-posta adresiniz ve şifrenizle giriş yapın.</p>
-  <label style="text-align:left;">E-posta</label><input type="email" id="loginEmail" placeholder="ornek@firma.com" autocomplete="username">
-  <label style="text-align:left;">Şifre</label><input type="password" id="loginSifre" placeholder="Şifreniz" autocomplete="current-password">
-  <button class="btn btn-primary" onclick="girisYap()">Sisteme Giriş Yap</button>
-  <button class="btn btn-gray" onclick="sifreSifirlamaIste()">Şifremi e-posta ile sıfırla</button>
-  <div id="loginHata" style="color:#ef4444;font-size:13px;margin-top:10px;display:none;font-weight:bold;"></div>
-</div></div>
+<div id="loginOverlay">
+  <div class="login-card">
+    <h2>🔒 Zümrüt Giriş Portalı</h2>
+    <p>Lütfen hesabınızı seçin ve şifrenizi girin.</p>
+    <label style="text-align:left;">Kullanıcı</label>
+    <select id="loginKullaniciSecici"></select>
+    <label style="text-align:left;">Şifre / PIN</label>
+    <input type="password" id="loginSifre" placeholder="••••" style="text-align:center;font-size:22px;letter-spacing:4px;">
+    <button class="btn btn-primary" onclick="girisYap()">Sisteme Giriş Yap</button>
+    <div id="loginHata" style="color:#ef4444;font-size:13px;margin-top:10px;display:none;font-weight:bold;">Hatalı şifre girdiniz!</div>
+  </div>
+</div>
 
 <!-- ANA UYGULAMA -->
 <div id="anaUygulama" style="display:none;max-width:900px;margin:auto;">
@@ -151,7 +155,6 @@ td { padding: 10px; border-bottom: 1px solid #334155; word-break: break-all; }
     <!-- FATURALAR -->
     <div id="adminSekmeFaturalar" class="card">
       <h3><span>📂 Kayıtlı Faturalar</span><button class="btn-del" onclick="faturaSil()">🗑️ Seçiliyi Sil</button></h3>
-      <button class="btn btn-warn" onclick="eskiVerileriAktar()">📤 Bu cihazdaki eski verileri Firebase'e aktar</button>
       <label>Ara (fatura adı veya personel)</label>
       <input type="text" id="faturaAra" placeholder="Ara..." oninput="faturaListesiGuncelle()">
       <label>Faturayı Seçin:</label>
@@ -179,13 +182,12 @@ td { padding: 10px; border-bottom: 1px solid #334155; word-break: break-all; }
     <div id="adminSekmeKullanicilar" class="card" style="display:none;">
       <h3>👥 Personel Ekle / Düzenle / Sil</h3>
       <div class="row" style="align-items:end;">
-        <div><label>Ad Soyad</label><input type="text" id="yeniPersonelAd" placeholder="Personel Ad Soyad"></div>
-        <div><label>E-posta (giriş adı)</label><input type="email" id="yeniPersonelEmail" placeholder="personel@firma.com"></div>
-        <div><label>Başlangıç şifresi</label><input type="password" id="yeniPersonelSifre" placeholder="En az 6 karakter" autocomplete="new-password"></div>
+        <div style="flex:2;"><label>Ad Soyad</label><input type="text" id="yeniPersonelAd" placeholder="Yeni Personel Ad Soyad"></div>
+        <div><label>PIN</label><input type="password" id="yeniPersonelSifre" placeholder="PIN"></div>
       </div>
       <button class="btn btn-success" onclick="personelEkle()">➕ Eleman Ekle</button>
       <table>
-        <thead><tr><th>Personel</th><th>E-posta</th><th>Yetki</th><th>İşlem</th></tr></thead>
+        <thead><tr><th>Personel</th><th>Yetki</th><th>İşlem</th></tr></thead>
         <tbody id="kullaniciTablosu"></tbody>
       </table>
     </div>
@@ -244,6 +246,710 @@ td { padding: 10px; border-bottom: 1px solid #334155; word-break: break-all; }
   </div>
 </div>
 
-<script src="firebase-cloud.js"></script>
+<script>
+/* ---------- YARDIMCILAR ---------- */
+const esc = s => String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const $ = id => document.getElementById(id);
+
+async function sha256(metin) {
+  const veri = "zumrut|" + metin;
+  if (window.crypto && crypto.subtle) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(veri));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  return "plain:" + metin;
+}
+
+/* ---------- DEPO KATMANI ---------- */
+const Depo = {
+  oku(anahtar, varsayilan) { try { const v = localStorage.getItem(anahtar); return v ? JSON.parse(v) : varsayilan; } catch (e) { return varsayilan; } },
+  yaz(anahtar, deger) { localStorage.setItem(anahtar, JSON.stringify(deger)); },
+  sil(anahtar) { localStorage.removeItem(anahtar); }
+};
+
+/* ---------- DURUM ---------- */
+let kullanicilar = [];
+let aktifKullanici = null;
+let aktifKalemler = [];
+let tumFaturalar = Depo.oku("zumrut_faturalar", {});
+let urunler = Depo.oku("zumrut_urunler", {});
+let kayitsizUrunler = Depo.oku("zumrut_kayitsiz_urunler", []);
+let sesAcik = Depo.oku("zumrut_ses", true);
+let firebaseUrl = Depo.oku("zumrut_firebase_url", "");
+let secilenFotoBase64 = "";
+
+let html5QrCode = null, kameraAcik = false, fenerAcik = false;
+let kayitsizQrCode = null, kayitsizKameraAcik = false;
+let kilit = false, sonOkunan = "", sonOkunanZaman = 0;
+
+/* ---------- KULLANICILAR ---------- */
+async function kullanicilariHazirla() {
+  const yeniListe = [
+    { id: "patron", ad: "KORHAN", hash: await sha256("4919"), rol: "admin" },
+    { id: "p_hasan", ad: "HASAN BEKLER", hash: await sha256("1455"), rol: "personel" },
+    { id: "p_aleyna", ad: "ALEYNA CIFTCIER", hash: await sha256("1453"), rol: "personel" },
+    { id: "p_rabia", ad: "RABIA ISIK", hash: await sha256("1454"), rol: "personel" },
+    { id: "p_ali", ad: "ALI BOZBURUN", hash: await sha256("1456"), rol: "personel" },
+    { id: "p_eren", ad: "EREN", hash: await sha256("1457"), rol: "personel" }
+  ];
+
+  kullanicilar = yeniListe;
+  Depo.yaz("zumrut_kullanicilar", kullanicilar);
+  girisSelectGuncelle();
+}
+
+function girisSelectGuncelle() {
+  $("loginKullaniciSecici").innerHTML = kullanicilar.map(u =>
+    `<option value="${esc(u.id)}">${esc(u.ad)} (${u.rol === "admin" ? "Yönetici (Patron)" : "Personel"})</option>`).join("");
+}
+
+async function girisYap() {
+  const id = $("loginKullaniciSecici").value;
+  const sifre = $("loginSifre").value.trim();
+  const user = kullanicilar.find(x => x.id === id);
+  if (user && user.hash === await sha256(sifre)) {
+    aktifKullanici = user;
+    $("loginOverlay").style.display = "none";
+    $("anaUygulama").style.display = "block";
+    $("aktifKullaniciTag").innerText = "👤 " + user.ad + (user.rol === "admin" ? " (Patron)" : "");
+    $("personelAd").value = user.ad;
+    $("loginHata").style.display = "none";
+    $("loginSifre").value = "";
+    sesButonuGuncelle();
+    taslakYukle();
+    
+    if (user.rol === "admin") {
+      $("adminPaneli").style.display = "block";
+      faturaListesiGuncelle();
+      adminKullaniciTablosuCiz();
+      urunMetniniDoldur();
+      kayitsizListesiCiz();
+      $("firebaseUrl").value = firebaseUrl;
+    } else {
+      $("adminPaneli").style.display = "none";
+    }
+    buluttanVeriCek();
+  } else {
+    $("loginHata").style.display = "block";
+  }
+}
+
+async function cikisYap() {
+  await kameraKapat();
+  await kayitsizKameraKapat();
+  aktifKullanici = null;
+  aktifKalemler = [];
+  $("anaUygulama").style.display = "none";
+  $("loginOverlay").style.display = "flex";
+  $("loginSifre").value = "";
+}
+
+function adminSekmeDegis(tur) {
+  ["faturalar", "kayitsiz", "kullanicilar", "urunler", "bulut"].forEach(t => {
+    const el = $("adminSekme" + t.charAt(0).toUpperCase() + t.slice(1));
+    const btn = $("btnTab" + t.charAt(0).toUpperCase() + t.slice(1));
+    if (el) el.style.display = t === tur ? "block" : "none";
+    if (btn) btn.className = t === tur ? "active" : "";
+  });
+  if (tur === "kayitsiz") kayitsizListesiCiz();
+}
+
+function adminKullaniciTablosuCiz() {
+  $("kullaniciTablosu").innerHTML = kullanicilar.map(u => `
+    <tr>
+      <td><b>${esc(u.ad)}</b></td>
+      <td><span class="badge" style="background:${u.rol === "admin" ? "#0284c7" : "#64748b"}">${u.rol.toUpperCase()}</span></td>
+      <td>
+        <button class="btn-del" style="background:#d97706;" onclick="pinDegistir('${esc(u.id)}')">PIN Değiştir</button>
+        ${u.rol === "admin" ? "" : `<button class="btn-del" onclick="personelSil('${esc(u.id)}')">Sil</button>`}
+      </td>
+    </tr>`).join("");
+}
+
+async function personelEkle() {
+  const ad = $("yeniPersonelAd").value.trim().toUpperCase();
+  const sifre = $("yeniPersonelSifre").value.trim();
+  if (!ad || !sifre) { alert("Lütfen ad ve PIN girin!"); return; }
+  kullanicilar.push({ id: "p_" + Date.now(), ad, hash: await sha256(sifre), rol: "personel" });
+  Depo.yaz("zumrut_kullanicilar", kullanicilar);
+  girisSelectGuncelle();
+  adminKullaniciTablosuCiz();
+  $("yeniPersonelAd").value = ""; $("yeniPersonelSifre").value = "";
+  alert(ad + " sisteme eklendi!");
+}
+
+function personelSil(id) {
+  if (!confirm("Bu personeli silmek istediğinize emin misiniz?")) return;
+  kullanicilar = kullanicilar.filter(x => x.id !== id);
+  Depo.yaz("zumrut_kullanicilar", kullanicilar);
+  girisSelectGuncelle();
+  adminKullaniciTablosuCiz();
+}
+
+async function pinDegistir(id) {
+  const u = kullanicilar.find(x => x.id === id);
+  if (!u) return;
+  const yeni = prompt(u.ad + " için yeni PIN:");
+  if (!yeni || !yeni.trim()) return;
+  u.hash = await sha256(yeni.trim());
+  Depo.yaz("zumrut_kullanicilar", kullanicilar);
+  alert("Yeni PIN kaydedildi.");
+}
+
+/* ---------- ÜRÜN LİSTESİ ---------- */
+function urunMetniniDoldur() {
+  $("urunMetin").value = Object.entries(urunler).map(([b, a]) => b + ";" + a).join("\n");
+  $("urunSayac").innerText = Object.keys(urunler).length;
+}
+function urunMetniniCoz(metin) {
+  const yeni = {};
+  metin.split(/\r?\n/).forEach(satir => {
+    const s = satir.trim(); if (!s) return;
+    const i = s.search(/[;,\t]/);
+    if (i < 1) return;
+    const barkod = s.slice(0, i).trim().replace(/^"|"$/g, "");
+    const ad = s.slice(i + 1).trim().replace(/^"|"$/g, "");
+    if (barkod && ad) yeni[barkod] = ad;
+  });
+  return yeni;
+}
+function urunleriKaydet() {
+  urunler = urunMetniniCoz($("urunMetin").value);
+  Depo.yaz("zumrut_urunler", urunler);
+  urunMetniniDoldur();
+  bulutaKaydet("urunler", urunler);
+  alert(Object.keys(urunler).length + " ürün kaydedildi.");
+}
+function urunDosyaYukle(input) {
+  const f = input.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { $("urunMetin").value = r.result.replace(/^\uFEFF/, ""); urunleriKaydet(); input.value = ""; };
+  r.readAsText(f, "utf-8");
+}
+
+/* ---------- KAYITSIZ ÜRÜN BİLDİRİMİ (FONKSİYON TUŞLARI) ---------- */
+function kayitsizModalAc() {
+  $("kayitsizBarkod").value = $("barkodGiris").value || "";
+  $("kayitsizNot").value = "";
+  $("kayitsizFoto").value = "";
+  $("fotoOnizlemeAlani").style.display = "none";
+  secilenFotoBase64 = "";
+  kayitsizKameraKapat();
+  $("kayitsizModal").style.display = "flex";
+}
+
+async function kayitsizModalKapat() {
+  await kayitsizKameraKapat();
+  $("kayitsizModal").style.display = "none";
+}
+
+/* BARKOD İÇİN KAMERA FONKSİYON TUŞU */
+async function kayitsizBarkodKameraBaslat() {
+  if (kayitsizKameraAcik) {
+    await kayitsizKameraKapat();
+    return;
+  }
+  $("kayitsizReader").style.display = "block";
+  $("btnKayitsizBarkodKamera").innerText = "⏹️ Kapat";
+  $("btnKayitsizBarkodKamera").className = "btn-inline btn-gray";
+
+  kayitsizQrCode = new Html5Qrcode("kayitsizReader");
+  kayitsizQrCode.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 220, height: 120 } },
+    async (decodedText) => {
+      bip();
+      $("kayitsizBarkod").value = decodedText;
+      await kayitsizKameraKapat();
+      uyari("✅ Barkod okundu: " + decodedText);
+    }
+  ).then(() => {
+    kayitsizKameraAcik = true;
+  }).catch(err => {
+    kayitsizKameraKapat();
+    alert("Barkod kamerası başlatılamadı: " + err);
+  });
+}
+
+async function kayitsizKameraKapat() {
+  if (kayitsizQrCode && kayitsizKameraAcik) {
+    try { await kayitsizQrCode.stop(); kayitsizQrCode.clear(); } catch (e) {}
+  }
+  kayitsizQrCode = null;
+  kayitsizKameraAcik = false;
+  $("kayitsizReader").style.display = "none";
+  $("btnKayitsizBarkodKamera").innerText = "📷 Barkod Tara";
+  $("btnKayitsizBarkodKamera").className = "btn-inline btn-primary";
+}
+
+/* ÜRÜN RESMİ İÇİN FOTOĞRAF ÇEK / SEÇ */
+function fotoSecildi(input) {
+  const f = input.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement("canvas");
+      const MAX_WIDTH = 800;
+      let width = img.width, height = img.height;
+      if (width > MAX_WIDTH) {
+        height = Math.round((height * MAX_WIDTH) / width);
+        width = MAX_WIDTH;
+      }
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+      secilenFotoBase64 = canvas.toDataURL("image/jpeg", 0.7);
+      $("kayitsizFotoOnizleme").src = secilenFotoBase64;
+      $("fotoOnizlemeAlani").style.display = "block";
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(f);
+}
+
+function kayitsizUrunGonder() {
+  const barkod = $("kayitsizBarkod").value.trim();
+  const not = $("kayitsizNot").value.trim();
+  if (!barkod && !secilenFotoBase64) {
+    alert("Lütfen en azından bir barkod girin veya fotoğraf ekleyin!");
+    return;
+  }
+  const yeniKayit = {
+    id: "ku_" + Date.now(),
+    barkod: barkod || "Barkodsuz",
+    not: not || "Açıklama yok",
+    foto: secilenFotoBase64,
+    personel: aktifKullanici ? aktifKullanici.ad : "Bilinmiyor",
+    tarih: new Date().toLocaleDateString("tr-TR") + " " + new Date().toLocaleTimeString("tr-TR")
+  };
+
+  kayitsizUrunler.unshift(yeniKayit);
+  Depo.yaz("zumrut_kayitsiz_urunler", kayitsizUrunler);
+  bulutaKaydet("kayitsiz", kayitsizUrunler);
+  kayitsizModalKapat();
+  uyari("📸 Kayıtsız ürün patron paneline iletildi!");
+  kayitsizRozetGuncelle();
+}
+
+function kayitsizRozetGuncelle() {
+  if ($("kayitsizSayacBadge")) $("kayitsizSayacBadge").innerText = kayitsizUrunler.length;
+}
+
+function kayitsizListesiCiz() {
+  kayitsizRozetGuncelle();
+  const kutu = $("kayitsizUrunListesi");
+  if (!kutu) return;
+  if (kayitsizUrunler.length === 0) {
+    kutu.innerHTML = "<div style='color:#94a3b8;padding:20px;text-align:center;'>Henüz bildirilmiş kayıtsız ürün yok.</div>";
+    return;
+  }
+  kutu.innerHTML = kayitsizUrunler.map((item, idx) => `
+    <div class="kayitsiz-item">
+      ${item.foto ? `<img src="${item.foto}" class="kayitsiz-thumb" onclick="resimBuyut('${item.foto}')" title="Büyütmek için tıkla">` : `<div style="width:70px;height:70px;background:#1e293b;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:24px;">📦</div>`}
+      <div style="flex:1;">
+        <div style="font-weight:bold;color:#38bdf8;font-size:15px;">${esc(item.barkod)}</div>
+        <div style="color:#f8fafc;font-size:13px;margin:2px 0;">${esc(item.not)}</div>
+        <div style="color:#94a3b8;font-size:11px;">👤 ${esc(item.personel)} &bull; 🕒 ${esc(item.tarih)}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;">
+        <button class="btn-del" style="background:#16a34a;" onclick="kayitsizUrunuOnayla(${idx})">✔️ Ekle</button>
+        <button class="btn-del" onclick="kayitsizUrunSil(${idx})">🗑️ Sil</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function resimBuyut(src) {
+  $("buyukResim").src = src;
+  $("resimOnizlemeModal").style.display = "flex";
+}
+
+function kayitsizUrunSil(idx) {
+  if (!confirm("Bu bildirimi silmek istiyor musunuz?")) return;
+  kayitsizUrunler.splice(idx, 1);
+  Depo.yaz("zumrut_kayitsiz_urunler", kayitsizUrunler);
+  bulutaKaydet("kayitsiz", kayitsizUrunler);
+  kayitsizListesiCiz();
+}
+
+function tumKayitsizlariTemizle() {
+  if (kayitsizUrunler.length === 0) return;
+  if (!confirm("Tüm kayıtsız ürün bildirimleri temizlensin mi?")) return;
+  kayitsizUrunler = [];
+  Depo.yaz("zumrut_kayitsiz_urunler", kayitsizUrunler);
+  bulutaKaydet("kayitsiz", kayitsizUrunler);
+  kayitsizListesiCiz();
+}
+
+function kayitsizUrunuOnayla(idx) {
+  const item = kayitsizUrunler[idx];
+  const urunAdi = prompt("'" + item.barkod + "' için ürün adı girin:", item.not !== "Açıklama yok" ? item.not : "");
+  if (!urunAdi || !urunAdi.trim()) return;
+  urunler[item.barkod] = urunAdi.trim();
+  Depo.yaz("zumrut_urunler", urunler);
+  bulutaKaydet("urunler", urunler);
+  urunMetniniDoldur();
+  kayitsizUrunler.splice(idx, 1);
+  Depo.yaz("zumrut_kayitsiz_urunler", kayitsizUrunler);
+  bulutaKaydet("kayitsiz", kayitsizUrunler);
+  kayitsizListesiCiz();
+  alert("Ürün başarıyla ana ürün listesine kaydedildi!");
+}
+
+/* ---------- UZAKTAN ERİŞİM / SENKRON KATMANI ---------- */
+function firebaseKaydet() {
+  let url = $("firebaseUrl").value.trim();
+  if (url && !url.endsWith("/")) url += "/";
+  firebaseUrl = url;
+  Depo.yaz("zumrut_firebase_url", firebaseUrl);
+  if (url) {
+    bulutaKaydet("faturalar", tumFaturalar);
+    bulutaKaydet("urunler", urunler);
+    bulutaKaydet("kayitsiz", kayitsizUrunler);
+    alert("Bulut bağlantısı sağlandı ve veriler eşitlemeye başlandı.");
+  } else {
+    alert("Bulut bağlantısı temizlendi. Veriler sadece yerel bellekte saklanacak.");
+  }
+}
+
+async function bulutaKaydet(dal, veri) {
+  if (!firebaseUrl) return;
+  try {
+    await fetch(`${firebaseUrl}${dal}.json`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(veri)
+    });
+  } catch (e) {
+    console.warn("Bulut eşitleme hatası:", e);
+  }
+}
+
+async function buluttanVeriCek() {
+  if (!firebaseUrl) return;
+  try {
+    const resF = await fetch(`${firebaseUrl}faturalar.json`);
+    const fData = await resF.json();
+    if (fData) { tumFaturalar = Object.assign({}, tumFaturalar, fData); Depo.yaz("zumrut_faturalar", tumFaturalar); }
+
+    const resK = await fetch(`${firebaseUrl}kayitsiz.json`);
+    const kData = await resK.json();
+    if (kData && Array.isArray(kData)) {
+      kayitsizUrunler = kData;
+      Depo.yaz("zumrut_kayitsiz_urunler", kayitsizUrunler);
+      kayitsizListesiCiz();
+    }
+  } catch (e) {
+    console.warn("Buluttan çekme hatası:", e);
+  }
+}
+
+/* ---------- SES / UYARI ---------- */
+function sesButonuGuncelle() { $("btnSes").innerText = sesAcik ? "🔊 Ses: Açık" : "🔇 Ses: Kapalı"; }
+function sesDegistir() { sesAcik = !sesAcik; Depo.yaz("zumrut_ses", sesAcik); sesButonuGuncelle(); }
+
+function bip(hata) {
+  if (!sesAcik) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    o.frequency.value = hata ? 300 : 900;
+    o.connect(ctx.destination);
+    o.start();
+    setTimeout(() => { o.stop(); ctx.close(); }, hata ? 300 : 150);
+  } catch (e) {}
+}
+function uyari(mesaj, hata) {
+  const el = $("okunduUyari");
+  el.innerText = mesaj;
+  el.className = hata ? "hata" : "";
+  el.style.display = "block";
+  clearTimeout(uyari.t);
+  uyari.t = setTimeout(() => { el.style.display = "none"; }, 1400);
+}
+
+/* ---------- KAMERA ---------- */
+async function kameraDegistir() { kameraAcik ? await kameraKapat() : kameraAc(); }
+
+function kameraAc() {
+  if (kameraAcik) return;
+  html5QrCode = new Html5Qrcode("reader");
+  html5QrCode.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 250, height: 150 } },
+    (text) => {
+      const simdi = Date.now();
+      if (kilit) return;
+      if (text === sonOkunan && simdi - sonOkunanZaman < 3000) return;
+      kilit = true;
+      sonOkunan = text; sonOkunanZaman = simdi;
+      if (!$("faturaBaslik").value.trim()) {
+        uyari("⚠️ Önce Fatura / İrsaliye adını yazın!", true);
+        bip(true);
+        setTimeout(() => { kilit = false; }, 1500);
+        return;
+      }
+      adetSor(text);
+    }
+  ).then(() => {
+    kameraAcik = true;
+    $("btnKamera").innerText = "⏹️ Kamerayı Durdur";
+    $("btnKamera").className = "btn btn-gray";
+    $("btnFener").style.display = "block";
+  }).catch(err => {
+    html5QrCode = null;
+    alert("Kamera açılamadı: " + err);
+  });
+}
+
+/* ---------- ADET SORMA ---------- */
+let bekleyenBarkod = "";
+
+function adetSor(barkod) {
+  bekleyenBarkod = barkod;
+  $("modalBarkod").innerText = barkod;
+  $("modalUrun").innerText = urunler[barkod] || "Tanımsız Ürün";
+  const mevcut = aktifKalemler.find(k => k.barkod === barkod);
+  $("modalMevcut").innerText = mevcut ? "Listede zaten " + mevcut.adet + " adet var, girdiğiniz adet üzerine eklenir." : "";
+  $("modalAdet").value = 1;
+  $("adetModal").style.display = "flex";
+  bip();
+  if (navigator.vibrate) navigator.vibrate(150);
+  setTimeout(() => { $("modalAdet").focus(); $("modalAdet").select(); }, 80);
+}
+
+function adetModalKapat() {
+  $("adetModal").style.display = "none";
+  bekleyenBarkod = "";
+  sonOkunanZaman = Date.now();
+  kilit = false;
+}
+
+function adetOnayla() {
+  const adet = parseInt($("modalAdet").value);
+  if (!adet || adet < 1) { alert("Lütfen 1 veya daha büyük bir adet girin!"); return; }
+  const barkod = bekleyenBarkod;
+  $("barkodGiris").value = barkod;
+  $("adet").value = adet;
+  const eklendi = kalemEkle(true);
+  adetModalKapat();
+  if (eklendi) {
+    bip();
+    uyari("✅ EKLENDİ: " + barkod + " × " + adet + "\nSıradaki barkodu okutun");
+  }
+}
+
+function adetIptal() {
+  $("barkodGiris").value = "";
+  adetModalKapat();
+  uyari("İptal edildi. Sıradaki barkodu okutun");
+}
+
+async function kameraKapat() {
+  if (html5QrCode && kameraAcik) {
+    try { await html5QrCode.stop(); html5QrCode.clear(); } catch (e) {}
+  }
+  html5QrCode = null; kameraAcik = false; fenerAcik = false;
+  $("btnKamera").innerText = "📷 Kamerayı Başlat";
+  $("btnKamera").className = "btn btn-primary";
+  $("btnFener").style.display = "none";
+}
+
+async function fenerDegistir() {
+  try {
+    const video = document.querySelector("#reader video");
+    const track = video.srcObject.getVideoTracks()[0];
+    fenerAcik = !fenerAcik;
+    await track.applyConstraints({ advanced: [{ torch: fenerAcik }] });
+    $("btnFener").innerText = fenerAcik ? "🔦 Fener: Açık" : "🔦 Fener";
+  } catch (e) {
+    fenerAcik = false;
+    alert("Bu cihaz veya tarayıcı fener kontrolünü desteklemiyor.");
+  }
+}
+
+/* ---------- KALEMLER ---------- */
+function kalemEkle(otomatik) {
+  if (!$("faturaBaslik").value.trim()) {
+    uyari("⚠️ Önce Fatura / İrsaliye adını yazın!", true);
+    if (!otomatik) alert("Önce Fatura / İrsaliye adını yazın!");
+    return false;
+  }
+  const barkod = $("barkodGiris").value.trim();
+  const adet = Math.max(1, parseInt($("adet").value) || 1);
+  if (!barkod) { alert("Lütfen barkod okutun veya yazın!"); return false; }
+
+  const mevcut = aktifKalemler.find(k => k.barkod === barkod);
+  if (mevcut) {
+    mevcut.adet += adet;
+    mevcut.saat = new Date().toLocaleTimeString("tr-TR");
+  } else {
+    const sira = parseInt($("siraNo").value) || (aktifKalemler.length + 1);
+    aktifKalemler.push({ sira, barkod, adet, saat: new Date().toLocaleTimeString("tr-TR") });
+    $("siraNo").value = sira + 1;
+  }
+  $("barkodGiris").value = "";
+  $("adet").value = 1;
+  tabloCiz();
+  taslakKaydet();
+  return true;
+}
+
+function kalemSil(index) {
+  const k = aktifKalemler[index];
+  if (!k || !confirm(k.barkod + " satırı silinsin mi?")) return;
+  aktifKalemler.splice(index, 1);
+  tabloCiz();
+  taslakKaydet();
+}
+
+function tabloCiz() {
+  $("kalemTablosu").innerHTML = aktifKalemler.map((k, i) => ({ k, i })).reverse().map(({ k, i }) => `
+    <tr>
+      <td><span class="badge">#${esc(k.sira)}</span></td>
+      <td>${esc(k.barkod)}${urunler[k.barkod] ? `<span class="urun-ad">${esc(urunler[k.barkod])}</span>` : ""}</td>
+      <td><span class="badge-qty">${k.adet}</span></td>
+      <td><button class="btn-del" onclick="kalemSil(${i})">Sil</button></td>
+    </tr>`).join("");
+  $("kalemSayac").innerText = aktifKalemler.length;
+  $("toplamAdet").innerText = aktifKalemler.reduce((a, k) => a + k.adet, 0);
+}
+
+/* ---------- TASLAK ---------- */
+function taslakKaydet() {
+  if (!aktifKullanici) return;
+  Depo.yaz("zumrut_taslak_" + aktifKullanici.id, {
+    baslik: $("faturaBaslik").value, kalemler: aktifKalemler, sira: $("siraNo").value
+  });
+}
+function taslakYukle() {
+  const t = Depo.oku("zumrut_taslak_" + aktifKullanici.id, null);
+  aktifKalemler = t ? t.kalemler || [] : [];
+  $("faturaBaslik").value = t ? t.baslik || "" : "";
+  $("siraNo").value = t ? t.sira || aktifKalemler.length + 1 : 1;
+  tabloCiz();
+  if (aktifKalemler.length) uyari("📝 Yarım kalan sayımınız geri yüklendi (" + aktifKalemler.length + " kalem)");
+}
+function taslakTemizle() {
+  if (aktifKalemler.length && !confirm("Listedeki tüm kalemler silinecek. Emin misiniz?")) return;
+  aktifKalemler = [];
+  $("faturaBaslik").value = ""; $("siraNo").value = 1; $("barkodGiris").value = "";
+  Depo.sil("zumrut_taslak_" + aktifKullanici.id);
+  tabloCiz();
+}
+
+/* ---------- FATURA ---------- */
+function faturaKaydet() {
+  const baslik = $("faturaBaslik").value.trim();
+  if (!baslik) { alert("Lütfen Fatura / İrsaliye Adını yazın!"); return; }
+  if (aktifKalemler.length === 0) { alert("Listede hiç ürün yok!"); return; }
+  if (tumFaturalar[baslik] && !confirm("'" + baslik + "' adlı fatura zaten var. Üzerine yazılsın mı?")) return;
+
+  const simdi = new Date();
+  tumFaturalar[baslik] = {
+    personel: aktifKullanici.ad,
+    tarih: simdi.toLocaleDateString("tr-TR") + " " + simdi.toLocaleTimeString("tr-TR"),
+    kalemler: aktifKalemler.map(k => ({ ...k, urun: urunler[k.barkod] || "" }))
+  };
+  Depo.yaz("zumrut_faturalar", tumFaturalar);
+  bulutaKaydet("faturalar", tumFaturalar);
+
+  aktifKalemler = [];
+  $("faturaBaslik").value = ""; $("barkodGiris").value = ""; $("siraNo").value = 1;
+  Depo.sil("zumrut_taslak_" + aktifKullanici.id);
+  tabloCiz();
+  uyari("💾 Fatura kaydedildi: " + baslik);
+  if (aktifKullanici.rol === "admin") faturaListesiGuncelle();
+}
+
+function faturaListesiGuncelle() {
+  const aranan = $("faturaAra").value.trim().toLowerCase();
+  const secici = $("faturaSecici");
+  const onceki = secici.value;
+  const keys = Object.keys(tumFaturalar).filter(k =>
+    !aranan || k.toLowerCase().includes(aranan) || tumFaturalar[k].personel.toLowerCase().includes(aranan));
+
+  genelRaporCiz();
+  if (keys.length === 0) {
+    secici.innerHTML = "<option value=''>Kayıtlı fatura yok</option>";
+    $("detayTablosu").innerHTML = ""; $("faturaOzet").innerText = "";
+    return;
+  }
+  secici.innerHTML = keys.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join("");
+  if (keys.includes(onceki)) secici.value = onceki;
+  faturaDetayGoster();
+}
+
+function genelRaporCiz() {
+  const keys = Object.keys(tumFaturalar);
+  const kalem = keys.reduce((a, k) => a + tumFaturalar[k].kalemler.length, 0);
+  const adet = keys.reduce((a, k) => a + tumFaturalar[k].kalemler.reduce((b, x) => b + x.adet, 0), 0);
+  $("genelRapor").innerHTML = `<b>Genel toplam:</b> ${keys.length} fatura, ${kalem} kalem, ${adet} adet`;
+}
+
+function faturaDetayGoster() {
+  const secilen = $("faturaSecici").value;
+  const veri = tumFaturalar[secilen];
+  if (!veri) { $("detayTablosu").innerHTML = ""; $("faturaOzet").innerText = ""; return; }
+  const toplam = veri.kalemler.reduce((a, x) => a + x.adet, 0);
+  $("faturaOzet").innerHTML = `<b>Personel:</b> ${esc(veri.personel)}<br><b>Tarih:</b> ${esc(veri.tarih)}<br><b>Kalem:</b> ${veri.kalemler.length} | <b>Toplam:</b> ${toplam} Adet`;
+  $("detayTablosu").innerHTML = veri.kalemler.map(k => `
+    <tr>
+      <td><span class="badge">#${esc(k.sira)}</span></td>
+      <td>${esc(k.barkod)}${(k.urun || urunler[k.barkod]) ? `<span class="urun-ad">${esc(k.urun || urunler[k.barkod])}</span>` : ""}</td>
+      <td><span class="badge-qty">${k.adet}</span></td>
+      <td>${esc(k.saat)}</td>
+    </tr>`).join("");
+}
+
+function faturaSil() {
+  const secilen = $("faturaSecici").value;
+  if (!secilen || !tumFaturalar[secilen]) return;
+  if (!confirm("'" + secilen + "' başlıklı faturayı kalıcı olarak silmek istiyor musunuz?")) return;
+  delete tumFaturalar[secilen];
+  Depo.yaz("zumrut_faturalar", tumFaturalar);
+  bulutaKaydet("faturalar", tumFaturalar);
+  faturaListesiGuncelle();
+}
+
+/* ---------- DIŞA AKTARMA ---------- */
+function satirlariHazirla(secilen, veri) {
+  return veri.kalemler.map(k => [k.sira, k.barkod, k.urun || urunler[k.barkod] || "", k.adet, k.saat, veri.personel, secilen, veri.tarih]);
+}
+const BASLIKLAR = ["Sıra No", "Barkod", "Ürün Adı", "Adet", "Kayıt Saati", "Personel", "Fatura Başlığı", "Fatura Tarihi"];
+
+function excelIndir() {
+  const secilen = $("faturaSecici").value;
+  const veri = tumFaturalar[secilen];
+  if (!veri) return;
+  if (!window.XLSX) { alert("Excel kütüphanesi yüklenemedi. CSV olarak indiriliyor."); csvIndir(); return; }
+  const satirlar = [BASLIKLAR, ...satirlariHazirla(secilen, veri)];
+  const ws = XLSX.utils.aoa_to_sheet(satirlar);
+  ws["!cols"] = [{ wch: 8 }, { wch: 18 }, { wch: 28 }, { wch: 8 }, { wch: 12 }, { wch: 20 }, { wch: 24 }, { wch: 20 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Fatura");
+  XLSX.writeFile(wb, secilen.replace(/[\\/:*?"<>|]/g, "_") + ".xlsx");
+}
+
+function csvIndir() {
+  const secilen = $("faturaSecici").value;
+  const veri = tumFaturalar[secilen];
+  if (!veri) return;
+  const hucre = v => '"' + String(v).replace(/"/g, '""') + '"';
+  let csv = "\uFEFF" + BASLIKLAR.map(hucre).join(";") + "\n";
+  satirlariHazirla(secilen, veri).forEach(s => { csv += s.map(hucre).join(";") + "\n"; });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+  link.download = secilen.replace(/[\\/:*?"<>|]/g, "_") + ".csv";
+  link.click();
+}
+
+/* ---------- BAŞLANGIÇ ---------- */
+$("loginSifre").addEventListener("keydown", e => { if (e.key === "Enter") girisYap(); });
+kullanicilariHazirla();
+</script>
 </body>
 </html>
