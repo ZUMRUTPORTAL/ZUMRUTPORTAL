@@ -153,21 +153,21 @@ async function adminKullaniciTablosuCiz() {
   if (!aktifKullanici || aktifKullanici.rol !== "admin") return;
   const snap = await db.collection("profiles").get(); kullanicilar = snap.docs.map(d => Object.assign({id:d.id}, d.data()));
   $("kullaniciTablosu").innerHTML = kullanicilar.map(u =>
-    '<tr><td><b>'+esc(u.ad)+'</b>'+(u.active===false?'<span class="urun-ad"> (Erişim kapalı)</span>':'')+'</td><td>'+esc(u.email)+'</td><td><span class="badge">'+esc(String(u.role||"personel").toUpperCase())+'</span></td><td>'+
+    '<tr><td><b>'+esc(u.ad)+'</b>'+(u.active===false?'<span class="urun-ad"> (Erişim kapalı)</span>':'')+'</td><td>'+esc(u.email)+'</td><td><span class="badge">'+esc(String(u.role||"personel").toUpperCase())+'</span> '+(u.id===aktifKullanici.id?'':'<button class="btn-del" style="background:#1677ff" onclick="personelRolDegistir(\''+esc(u.id)+'\')">'+(u.role==="admin"?"Personel Yap":"Yönetici Yap")+'</button>')+'</td><td>'+
     '<button class="btn-del" style="background:#475569" onclick="personelAdiDegistir(\''+esc(u.id)+'\')">Adı Değiştir</button> '+
     '<button class="btn-del" style="background:#d97706" onclick="sifreSifirlamaGonder(\''+esc(u.id)+'\')">Sıfırlama E-postası</button> '+
-    (u.role === "admin" ? "" : '<button class="btn-del" onclick="personelSil(\''+esc(u.id)+'\')">Erişimi Kapat</button>')+'</td></tr>').join("");
+    (u.role === "admin" ? "" : '<button class="btn-del" onclick="personelSil(\''+esc(u.id)+'\')">Erişimi Kapat</button> <button class="btn-del" onclick="personelProfiliSil(\''+esc(u.id)+'\')">Profili Sil</button>')+'</td></tr>').join("");
 }
 async function personelEkle() {
   if (!aktifKullanici || aktifKullanici.rol !== "admin") return;
-  const ad=$("yeniPersonelAd").value.trim(), email=$("yeniPersonelEmail").value.trim().toLowerCase(), sifre=$("yeniPersonelSifre").value;
+  const ad=$("yeniPersonelAd").value.trim(), email=$("yeniPersonelEmail").value.trim().toLowerCase(), sifre=$("yeniPersonelSifre").value, role=$("yeniPersonelRol").value;
   if (!ad||!email||!sifre) { alert("Ad, e-posta ve başlangıç şifresi girin."); return; }
   if (sifre.length<6) { alert("Şifre en az 6 karakter olmalı."); return; }
   try {
     const c=await personelAuth.createUserWithEmailAndPassword(email,sifre);
-    await db.collection("profiles").doc(c.user.uid).set({ad,email,role:"personel",active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
-    await personelAuth.signOut(); $("yeniPersonelAd").value=""; $("yeniPersonelEmail").value=""; $("yeniPersonelSifre").value="";
-    await adminKullaniciTablosuCiz(); alert(ad+" hesabı oluşturuldu.");
+    await db.collection("profiles").doc(c.user.uid).set({ad,email,role,active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp()});
+    await personelAuth.signOut(); $("yeniPersonelAd").value=""; $("yeniPersonelEmail").value=""; $("yeniPersonelSifre").value=""; $("yeniPersonelRol").value="personel";
+    await adminKullaniciTablosuCiz(); alert(ad+" hesabı oluşturuldu ("+(role==="admin"?"yönetici":"personel")+").");
   } catch(e) { try { await personelAuth.signOut(); } catch(x) {} alert("Hesap oluşturulamadı: "+hataMetni(e)); }
 }
 async function personelAdiDegistir(id) {
@@ -181,6 +181,36 @@ async function sifreSifirlamaGonder(id) {
   if(!confirm(u.email+" adresine şifre sıfırlama bağlantısı gönderilsin mi?"))return;
   try { await auth.sendPasswordResetEmail(u.email); alert("Sıfırlama bağlantısı gönderildi: "+u.email); } catch(e){alert(hataMetni(e));}
 }
+
+async function personelProfiliSil(id) {
+  const u=kullanicilar.find(x=>x.id===id);
+  if(!u||u.role==="admin"||aktifKullanici?.rol!=="admin")return;
+  if(!confirm(u.ad+" profilini portal listesinden kalıcı olarak kaldırayım mı? Portal erişimi kapanır. Faturalar ve eski kayıtlar korunur. Firebase Authentication giriş hesabı ayrıca Firebase Console’dan silinmelidir."))return;
+  try {
+    await db.collection("profiles").doc(id).delete();
+    kullanicilar=kullanicilar.filter(x=>x.id!==id);
+    await adminKullaniciTablosuCiz();
+    alert("Portal profili silindi. Tam hesap silme için Firebase Console → Authentication → Users bölümünden bu e-posta hesabını da silin.");
+  } catch(e) {
+    alert("Profil silinemedi: "+hataMetni(e)+". Firestore kurallarınız admin için profil silmeye izin vermiyor olabilir.");
+  }
+}
+
+
+async function personelRolDegistir(id) {
+  const u=kullanicilar.find(x=>x.id===id);
+  if(!u||aktifKullanici?.rol!=="admin"||id===aktifKullanici.id)return;
+  const role=u.role==="admin"?"personel":"admin";
+  if(!confirm(u.ad+" kullanıcısının yetkisi "+(role==="admin"?"YÖNETİCİ":"PERSONEL")+" olarak değiştirilsin mi?"))return;
+  try {
+    await db.collection("profiles").doc(id).update({role});
+    await adminKullaniciTablosuCiz();
+    alert(u.ad+" için yetki güncellendi.");
+  } catch(e) {
+    alert("Yetki değiştirilemedi: "+hataMetni(e)+". Firestore kurallarınız admin için rol değiştirmeye izin vermiyor olabilir.");
+  }
+}
+
 async function personelSil(id) {
   const u=kullanicilar.find(x=>x.id===id); if(!u||u.role==="admin"||aktifKullanici.rol!=="admin")return;
   if(!confirm(u.ad+" hesabının erişimi kapatılsın mı? Kayıtları korunur."))return;
