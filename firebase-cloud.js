@@ -77,9 +77,9 @@ async function profileYukle(user) {
     aktifKullanici = {id:user.uid, email:user.email || p.email || "", ad:p.ad || user.email || "Kullanıcı", rol:p.role || "personel"};
     await bulutVerisiniYukle();
     $("loginOverlay").style.display = "none"; $("anaUygulama").style.display = "block";
-    $("aktifKullaniciTag").innerText = "👤 " + aktifKullanici.ad; $("personelAd").value = aktifKullanici.ad;
+    $("aktifKullaniciTag").innerText = "👤 " + aktifKullanici.ad; $("personelAd").value = aktifKullanici.ad; portalYetkiAyarla(aktifKullanici.rol);
     $("loginSifre").value = ""; $("loginHata").style.display = "none"; sesButonuGuncelle(); await taslakYukle();
-    if (aktifKullanici.rol === "admin") { $("adminPaneli").style.display = "block"; faturaListesiGuncelle(); await adminKullaniciTablosuCiz(); urunMetniniDoldur(); }
+    if (aktifKullanici.rol === "admin") { $("adminPaneli").style.display = "none"; faturaListesiGuncelle(); await adminKullaniciTablosuCiz(); urunMetniniDoldur(); }
     else { $("adminPaneli").style.display = "none"; }
     firebaseKaydet();
   } catch (e) {
